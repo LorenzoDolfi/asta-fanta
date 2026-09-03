@@ -14,7 +14,7 @@ drop table if exists settings cascade;
 create table settings (
   id                  int primary key default 1,
   admin_code          text not null default 'mister',
-  bid_window_seconds  int  not null default 20,
+  bid_window_seconds  int  not null default 10,
   constraint settings_singleton check (id = 1)
 );
 insert into settings (id) values (1);
@@ -96,7 +96,10 @@ create or replace function server_now() returns timestamptz
 language sql stable as $$ select now(); $$;
 
 create or replace function check_admin_code(p_code text) returns boolean
-language sql stable as $$
+language sql stable security definer
+set search_path = public as $$
+  -- security definer: settings has no read policy, so this must bypass RLS.
+  -- It only ever returns true/false, never the code itself.
   select exists (select 1 from settings where id = 1 and admin_code = p_code);
 $$;
 
@@ -188,6 +191,10 @@ begin
   if btrim(coalesce(p_player, '')) = '' then raise exception 'Serve un nome'; end if;
   if teams_missing(s.phase) = 0 then
     raise exception 'Tutte le rose hanno questo reparto completo';
+  end if;
+  if exists (select 1 from roster r
+             where lower(btrim(r.player)) = lower(btrim(p_player))) then
+    raise exception 'Giocatore gia'' assegnato';
   end if;
 
   update auction_state
