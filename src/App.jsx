@@ -1,11 +1,12 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { loadAll, subscribeAll, serverOffset, api } from "./lib/db";
 import {
   ROLES, TOTAL_SLOTS, role, nextPhase,
   countRole, roleFull, maxBid, missingForPhase,
 } from "./lib/rules";
+import { fold, searchPlayers, isKnownPlayer } from "./lib/players";
 
-const BID_WINDOW = 20000; // keep in step with settings.bid_window_seconds
+const BID_WINDOW = 10000; // keep in step with settings.bid_window_seconds
 const ME_KEY = "asta:me";
 const CODE_KEY = "asta:code";
 
@@ -373,7 +374,7 @@ function Slab({ lot, phase, teams, roster, me, myTeam, now, offset, busy, onBid 
   const canBid = !full && !iAmHigh && cap > high;
   const left = lot.endsAt ? Math.max(0, lot.endsAt - (now + offset)) : null;
   const secs = left === null ? null : left / 1000;
-  const urgent = secs !== null && secs <= 5;
+  const urgent = secs !== null && secs <= 3;
 
   const submit = (amount) => {
     if (!canBid || busy) return;
@@ -444,7 +445,6 @@ function Slab({ lot, phase, teams, roster, me, myTeam, now, offset, busy, onBid 
 /* ───────────────────────── admin ───────────────────────── */
 
 function AdminPanel({ teams, roster, phase, lot, busy, onOpen, onVoid, onAdvance, onUndo, onRename, onReset }) {
-  const [name, setName] = useState("");
   const [openNames, setOpenNames] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
 
@@ -453,21 +453,13 @@ function AdminPanel({ teams, roster, phase, lot, busy, onOpen, onVoid, onAdvance
   const done = phase === "DONE";
   const complete = missing.length === 0;
 
-  const nominate = () => { if (name.trim()) { onOpen(name.trim(), null); setName(""); } };
-
   return (
     <div className="admin">
-      <div className="admin-row">
-        <input className="field grow"
-               placeholder={done ? "Asta finita" : `Nome ${role(phase).one.toLowerCase()} da mettere all'asta`}
-               value={name} onChange={(e) => setName(e.target.value)}
-               onKeyDown={(e) => { if (e.key === "Enter") nominate(); }}
-               disabled={!!lot || done || complete} />
-        <button className="primary" disabled={busy || !!lot || !name.trim() || done || complete}
-                onClick={nominate}>
-          Metti all'asta
-        </button>
-      </div>
+      <PlayerPicker
+        phase={phase} roster={roster} busy={busy}
+        disabled={!!lot || done || complete}
+        onNominate={(playerName) => onOpen(playerName, null)}
+      />
 
       <div className="admin-row wrap">
         {lot && <button className="ghost danger" onClick={onVoid}>Annulla il lotto in corso</button>}
@@ -505,6 +497,94 @@ function AdminPanel({ teams, roster, phase, lot, busy, onOpen, onVoid, onAdvance
       )}
     </div>
   );
+}
+
+/* Autocomplete over the Serie A list: current position only, sold players hidden. */
+function PlayerPicker({ phase, roster, busy, disabled, onNominate }) {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const [hi, setHi] = useState(0);
+  const inputRef = useRef(null);
+
+  const taken = useMemo(() => new Set(roster.map((p) => fold(p.player))), [roster]);
+  const results = useMemo(
+    () => (disabled ? [] : searchPlayers(q, phase, taken)),
+    [q, phase, taken, disabled]
+  );
+
+  useEffect(() => { setHi(0); }, [q, phase]);
+  useEffect(() => { setQ(""); setOpen(false); }, [phase]);
+
+  const pick = (p) => {
+    setQ(p.name);
+    setOpen(false);
+    inputRef.current?.focus();
+  };
+
+  const nominate = () => {
+    const name = q.trim();
+    if (!name || disabled || busy) return;
+    onNominate(name);
+    setQ("");
+    setOpen(false);
+  };
+
+  const onKeyDown = (e) => {
+    if (open && results.length) {
+      if (e.key === "ArrowDown") { e.preventDefault(); setHi((h) => (h + 1) % results.length); return; }
+      if (e.key === "ArrowUp")   { e.preventDefault(); setHi((h) => (h - 1 + results.length) % results.length); return; }
+      if (e.key === "Enter")     { e.preventDefault(); pick(results[hi]); return; }
+      if (e.key === "Escape")    { setOpen(false); return; }
+    }
+    if (e.key === "Enter") nominate();
+  };
+
+  const known = q.trim() && isKnownPlayer(q, phase);
+  const label = done_label(phase, disabled);
+
+  return (
+    <div className="picker-wrap">
+      <div className="admin-row">
+        <div className="picker">
+          <input
+            ref={inputRef} className="field grow" placeholder={label} value={q}
+            disabled={disabled} autoComplete="off"
+            onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+            onFocus={() => setOpen(true)}
+            onBlur={() => setTimeout(() => setOpen(false), 120)}
+            onKeyDown={onKeyDown}
+          />
+          {open && results.length > 0 && (
+            <ul className="suggest">
+              {results.map((p, i) => (
+                <li key={p.name}
+                    className={"suggest-row" + (i === hi ? " on" : "")}
+                    onMouseDown={(e) => { e.preventDefault(); pick(p); }}
+                    onMouseEnter={() => setHi(i)}>
+                  <span className="suggest-name">{p.name}</span>
+                  <span className="suggest-club">{p.club}</span>
+                  <span className="suggest-q" title="Quotazione">{p.q}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <button className="primary" disabled={busy || disabled || !q.trim()} onClick={nominate}>
+          Metti all'asta
+        </button>
+      </div>
+      {q.trim() && !known && !disabled && (
+        <p className="admin-note">
+          "{q.trim()}" non e' fra i {role(phase).label.toLowerCase()} in lista. Puoi comunque metterlo all'asta.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function done_label(phase, disabled) {
+  if (disabled) return "Non e' il momento di chiamare un giocatore";
+  return `Cerca un ${role(phase).one.toLowerCase()}...`;
 }
 
 function NameField({ team, onRename }) {

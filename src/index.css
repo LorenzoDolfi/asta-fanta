@@ -171,3 +171,18 @@ body{margin:0;background:#0E1726}
   .chat{max-height:48vh}
 }
 @media (prefers-reduced-motion:reduce){ .drain i{transition:none} }
+
+/* ── player autocomplete ─────────────────────────────────── */
+.asta-root .picker-wrap{display:flex;flex-direction:column;gap:6px}
+.asta-root .picker{position:relative;flex:1;display:flex;min-width:0}
+.asta-root .suggest{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:30;
+  margin:0;padding:4px;list-style:none;background:var(--ink);border:1px solid var(--azz);
+  border-radius:4px;max-height:290px;overflow:auto;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+.asta-root .suggest-row{display:flex;align-items:baseline;gap:8px;padding:7px 9px;
+  border-radius:3px;cursor:pointer}
+.asta-root .suggest-row.on{background:rgba(79,168,240,.18)}
+.asta-root .suggest-name{flex:1;font-weight:500;min-width:0;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.asta-root .suggest-club{font-size:12px;color:var(--dim)}
+.asta-root .suggest-q{font-family:"Barlow Condensed",sans-serif;font-size:17px;font-weight:700;
+  color:var(--oro);font-variant-numeric:tabular-nums;min-width:24px;text-align:right}
